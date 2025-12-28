@@ -337,7 +337,9 @@ impl MambaBlock {
         let x_conv = new_conv_state
             .broadcast_mul(&conv_weight.unsqueeze(0)?)?
             .sum(D::Minus1)?;
-        let x_conv = (x_conv + self.conv1d.bias().unwrap())?;
+        // Bias is (d_inner,), x_conv is (b, d_inner) - need to unsqueeze for broadcast
+        let bias = self.conv1d.bias().unwrap().unsqueeze(0)?;
+        let x_conv = x_conv.broadcast_add(&bias)?;
         let x_conv = candle_nn::ops::silu(&x_conv)?;
 
         // SSM projections
@@ -367,7 +369,9 @@ impl MambaBlock {
         // Output: y = h @ c + d * x
         let c_exp = c.unsqueeze(D::Minus1)?; // (b, d_state, 1)
         let y = h_new.matmul(&c_exp)?.squeeze(D::Minus1)?; // (b, d_inner)
-        let y = (y + x_conv.broadcast_mul(&d)?)?;
+        // d is (d_inner,), need to unsqueeze for broadcast with (b, d_inner)
+        let d_exp = d.unsqueeze(0)?;
+        let y = y.broadcast_add(&x_conv.broadcast_mul(&d_exp)?)?;
 
         // Gate and project
         let out = (y * candle_nn::ops::silu(res)?)?;
